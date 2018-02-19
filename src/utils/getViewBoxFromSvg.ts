@@ -1,19 +1,17 @@
-import parseViewBox from 'utils/parseViewBox';
+import parseViewBox from './parseViewBox';
 
-export default function getViewBoxFromSvg(svg) {
-	var viewBoxAttr, width, height, boundingClientRect;
-
-	viewBoxAttr = svg.getAttribute('viewBox');
+export default function getViewBoxFromSvg(svg: SVGSVGElement) {
+	const viewBoxAttr = svg.getAttribute('viewBox');
 
 	if (viewBoxAttr) {
 		return parseViewBox(viewBoxAttr);
 	}
 
-	width = svg.getAttribute('width');
-	height = svg.getAttribute('height');
+	let width = +svg.getAttribute('width');
+	let height = +svg.getAttribute('height');
 
 	if (!width && !height) {
-		boundingClientRect = svg.getBoundingClientRect();
+		const boundingClientRect = svg.getBoundingClientRect();
 		width = boundingClientRect.width;
 		height = boundingClientRect.height;
 	}

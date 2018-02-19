@@ -18,7 +18,7 @@
 // easeInOut below are named easeInCubic, easeOutCubic, and
 // (you guessed it) easeInOutCubic.
 
-export default {
+const easing: Record<string, (t: number) => number> = {
 	linear: (pos: number) => pos,
 
 	easeIn: (pos: number) => Math.pow(pos, 3),
@@ -33,3 +33,5 @@ export default {
 		return 0.5 * (Math.pow(pos - 2, 3) + 2);
 	}
 };
+
+export default easing;

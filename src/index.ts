@@ -1,16 +1,15 @@
-import mouseDrag from './interaction/mouseDrag';
+import mouseDrag from './interaction/mouse';
 import touch from './interaction/touch';
-import applyInertia from './interaction/applyInertia';
 import Tween from './animation/Tween';
 import VanWijk from './animation/VanWijk';
 
 import easing from './utils/easing';
 import getViewBoxFromSvg from './utils/getViewBoxFromSvg';
 
-import { Box, Constraints, ViewBoxOptions } from './interfaces';
+import { AnimationOptions, Box, Constraints, Point, ViewBoxOptions, StoppablePromise, SVG } from './interfaces';
 
 export default class ViewBox {
-	svg: SVGSVGElement;
+	svg: SVG;
 	constraints: Constraints;
 
 	inertia: boolean;
@@ -20,13 +19,18 @@ export default class ViewBox {
 	width: number;
 	height: number;
 
+	animation: Tween | VanWijk;
+
 	_dirty: boolean;
 	_elWidth: number;
 	_elHeight: number;
 	_aspectRatio: number;
 	_ctm: SVGMatrix;
+	_velocity: { x: number, y: number, t: number };
 
-	constructor(svg: SVGSVGElement, options: ViewBoxOptions = {}) {
+	_callbacks: Record<string, Array<(vb: ViewBox) => void>>;
+
+	constructor(svg: SVG, options: ViewBoxOptions = {}) {
 		if (!(svg instanceof SVGSVGElement)) {
 			throw new Error('First argument must be an svg element');
 		}
@@ -44,15 +48,13 @@ export default class ViewBox {
 		if ('width' in options) initialViewBox.width = options.width;
 		if ('height' in options) initialViewBox.height = options.height;
 
+		this._dirty = true;
 		this._clean();
 
 		this.set(initialViewBox);
 
 		// set up interactions
 		this.inertia = !!options.inertia;
-		this._applyInertia = function() {
-			applyInertia(self);
-		};
 
 		// mouse interactions
 		if (options.mouseDrag) {
@@ -69,29 +71,31 @@ export default class ViewBox {
 				touch(this, options);
 			}
 		}
+
+		this._callbacks = {};
 	}
 
-	animate({ x = this.x, y = this.y, width = this.width, height = this.height }, options) {
-		var maximised, reshaped, easingFn;
-
+	animate({ x = this.x, y = this.y, width = this.width, height = this.height }, options: AnimationOptions) {
 		this._clean();
 
-		if (this.animation) {
-			this.animation.stop();
-		}
+		if (this.animation) this.animation.stop();
 
 		const box = this._constrain(x, y, width, height);
 
-		easingFn =
+		const easingFn =
 			(typeof options.easing === 'function'
 				? options.easing
-				: easing[options.easing]) || linear;
+				: easing[options.easing]) || easing.easeOut;
 
-		if (options.smooth) {
-			this.animation = new VanWijk(this, box, options, easingFn);
-		} else {
-			this.animation = new Tween(this, box, options, easingFn);
-		}
+		const promise: StoppablePromise<any> = new Promise((fulfil) => {
+			this.animation = options.smooth ?
+				new VanWijk(this, box, options, easingFn, fulfil) :
+				new Tween(this, box, options, easingFn, fulfil);
+		});
+
+		promise.stop = () => this.animation.stop();
+
+		return promise;
 	}
 
 	dirty() {
@@ -117,8 +121,8 @@ export default class ViewBox {
 		const ctm = this._ctm;
 
 		return {
-			x: (x - ctm.e) / ctm_a,
-			y: (y - ctm.f) / ctm_a
+			x: (x - ctm.e) / ctm.a,
+			y: (y - ctm.f) / ctm.a
 		};
 	}
 
@@ -127,7 +131,19 @@ export default class ViewBox {
 		return Math.min(this._elWidth / this.width, this._elHeight / this.height);
 	}
 
-	pan(dx: number, dy: number, animate) {
+	on(eventName: string, callback: (vb: ViewBox) => void) {
+		const callbacks = (this._callbacks[eventName] || (this._callbacks[eventName] = []));
+		callbacks.push(callback);
+
+		return {
+			cancel: () => {
+				const index = callbacks.indexOf(callback);
+				if (~index) callbacks.splice(index, 1);
+			}
+		};
+	}
+
+	pan(dx: number, dy: number, animate?: AnimationOptions) {
 		this._clean();
 
 		const zoom = this.getZoom();
@@ -166,14 +182,14 @@ export default class ViewBox {
 		return `${this.x} ${this.y} ${this.width} ${this.height}`;
 	}
 
-	zoom(clientX, clientY, factor, animate) {
-		if (isNaN(clientX) || isNaN(clientY) || isNaN(factor)) {
+	zoom({ x, y, factor }: { x: number, y: number, factor: number }, animate?: AnimationOptions) {
+		if (isNaN(x) || isNaN(y) || isNaN(factor)) {
 			throw new Error(
 				'Bad arguments: ' + Array.prototype.slice.call(arguments).join(', ')
 			);
 		}
 
-		const coords = this.getSvgCoords(clientX, clientY);
+		const coords = this.getSvgCoords({ x, y });
 
 		const { constraints } = this;
 
@@ -193,7 +209,15 @@ export default class ViewBox {
 			factor = Math.max(factor, this.height / maxHeight);
 		}
 
-		const zoomed = zoom(this, coords.x, coords.y, factor);
+		const x1_to_cx = coords.x - this.x;
+		const y1_to_cy = coords.y - this.y;
+
+		const zoomed = {
+			x: coords.x - (x1_to_cx / factor),
+			y: coords.y - (y1_to_cy / factor),
+			width: this.width / factor,
+			height: this.height / factor
+		};
 
 		const box = this._constrain(zoomed.x, zoomed.y, zoomed.width, zoomed.height);
 
@@ -207,18 +231,12 @@ export default class ViewBox {
 	_clean() {
 		if (!this._dirty) return;
 
-		var computedStyle,
-			parentElement,
-			parentComputedStyle,
-			parentWidth,
-			parentHeight;
-
 		this._elWidth = this.svg.offsetWidth;
 		this._elHeight = this.svg.offsetHeight;
 
 		if (this._elWidth === undefined) {
 			// We must be in FireFox. Goddammit.
-			computedStyle = getComputedStyle(this.svg);
+			const computedStyle = getComputedStyle(this.svg);
 
 			this._elWidth = stripPx(computedStyle.width);
 			this._elHeight = stripPx(computedStyle.height);
@@ -230,33 +248,15 @@ export default class ViewBox {
 	}
 
 	_constrain(x: number, y: number, width: number, height: number) {
-		var currentZoom,
-			clientBox,
-			maximised,
-			cx,
-			cy,
-			minWidth,
-			minHeight,
-			desiredAspectRatio,
-			constrained,
-			maxZoomFactor,
-			minZoomX,
-			minZoomY,
-			minZoom,
-			minZoomFactor,
-			zoomFactor,
-			recheck,
-			d;
-
-		desiredAspectRatio = width / height;
+		const desiredAspectRatio = width / height;
 
 		const { _elWidth, _elHeight, constraints } = this;
 
-		maximised = this._maximise(x, y, width, height, _elWidth / _elHeight);
+		const maximised = this._maximise(x, y, width, height, _elWidth / _elHeight);
 
-		currentZoom = _elWidth / maximised.width;
+		const currentZoom = _elWidth / maximised.width;
 
-		maxZoomFactor = 1;
+		let maxZoomFactor = 1;
 
 		// If we're past the maxZoom, we need to zoom out
 		if (constraints.maxZoom !== undefined && currentZoom > constraints.maxZoom) {
@@ -264,23 +264,23 @@ export default class ViewBox {
 		}
 
 		// But if we violate our bounds, we need to zoom in
-		if (constraints.left !== undefined && constraints.right !== undefined) {
-			minZoomX = _elWidth / (constraints.right - constraints.left);
-		}
+		const minZoomX = (constraints.left !== undefined && constraints.right !== undefined)
+			? _elWidth / (constraints.right - constraints.left)
+			: 0;
 
-		if (constraints.top !== undefined && constraints.bottom !== undefined) {
-			minZoomY = _elHeight / (constraints.bottom - constraints.top);
-		}
+		const minZoomY = (constraints.top !== undefined && constraints.bottom !== undefined)
+			? _elHeight / (constraints.bottom - constraints.top)
+			: 0;
 
-		minZoom = Math.max(minZoomX || 0, minZoomY || 0);
+		const minZoom = Math.max(minZoomX || 0, minZoomY || 0);
 
 		// Bounds take priority over maxZoom
-		zoomFactor = Math.max(minZoom / currentZoom, maxZoomFactor);
+		const zoomFactor = Math.max(minZoom / currentZoom, maxZoomFactor);
 
 		if (zoomFactor !== 1) {
 			// Apply zoom
-			cx = maximised.x + maximised.width / 2;
-			cy = maximised.y + maximised.height / 2;
+			const cx = maximised.x + maximised.width / 2;
+			const cy = maximised.y + maximised.height / 2;
 
 			maximised.width /= zoomFactor;
 			maximised.height /= zoomFactor;
@@ -323,7 +323,7 @@ export default class ViewBox {
 	}
 
 	_maximise(x: number, y: number, width: number, height: number, containerAspectRatio: number): Box {
-		var maximised: Box = {};
+		const maximised: Box = {};
 
 		if (width / height < containerAspectRatio) {
 			// preserve height
@@ -364,6 +364,39 @@ export default class ViewBox {
 		}
 
 		return minimised;
+	}
+
+	_applyInertia() {
+		if (!this.inertia || !this._velocity) {
+			return;
+		}
+
+		const v = this._velocity;
+
+		const time = window.performance.now();
+		const elapsed = time - v.t;
+
+		this.pan(v.x * elapsed, v.y * elapsed);
+
+		const attenuation = Math.pow(0.99, elapsed);
+
+		v.x *= attenuation;
+		v.y *= attenuation;
+
+		const absoluteVelocity = Math.sqrt(v.x * v.x + v.y * v.y);
+		if (absoluteVelocity < 0.001) return;
+
+		v.t = time;
+		requestAnimationFrame(() => this._applyInertia());
+	}
+
+	_fire(eventName: string) {
+		const callbacks = this._callbacks[eventName];
+		if (!callbacks) return;
+
+		callbacks.slice().forEach(callback => {
+			callback(this);
+		});
 	}
 }
 

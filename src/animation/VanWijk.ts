@@ -10,7 +10,7 @@ export default class VanWijk {
 	constructor(
 		vb: ViewBox,
 		target: Box,
-		options: { V?: number, rho?: number, step: () => void },
+		options: { V?: number, rho?: number, step?: () => void },
 		easing: (t: number) => number,
 		fulfil: () => void
 	) {

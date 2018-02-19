@@ -7,7 +7,7 @@ export default class Tween {
 	constructor(
 		vb: ViewBox,
 		target: Box,
-		options: { duration?: number, step: () => void },
+		options: { duration?: number, step?: () => void },
 		easing: (t: number) => number,
 		fulfil: () => void
 	) {

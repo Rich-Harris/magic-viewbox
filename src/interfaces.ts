@@ -7,6 +7,10 @@ export type ViewBoxOptions = {
 	constraints?: Constraints;
 
 	inertia?: boolean;
+	mouseDrag?: boolean;
+	singleFingerDrag?: boolean;
+	twoFingerDrag?: boolean;
+	pinchZoom?: boolean;
 };
 
 export type Constraints = {
@@ -27,4 +31,28 @@ export type Box = {
 export type Point = {
 	x: number;
 	y: number;
+}
+
+export type AnimationOptions = {
+	smooth?: boolean;
+	V?: number;
+	rho?: number;
+	duration?: number;
+	easing?: (t: number) => number;
+	step?: () => void;
+};
+
+export interface StoppablePromise<T> extends Promise<T> {
+	stop?: () => void;
+}
+
+export interface SVG extends SVGSVGElement {
+	offsetWidth?: number;
+	offsetHeight?: number;
+}
+
+export type TouchOptions = {
+	singleFingerDrag?: boolean;
+	twoFingerDrag?: boolean;
+	pinchZoom?: boolean;
 }

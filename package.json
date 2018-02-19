@@ -1,9 +1,9 @@
 {
-  "name": "TODO",
-  "description": "TODO",
-  "version": "1.0.0",
-  "main": "dist/TODO.umd.js",
-  "module": "dist/TODO.esm.js",
+  "name": "magic-viewbox",
+  "description": "Library for making draggable, zoomable, interactive SVG viewboxes",
+  "version": "0.0.1",
+  "main": "dist/magic-viewbox.umd.js",
+  "module": "dist/magic-viewbox.esm.js",
   "types": "types/index.d.ts",
   "files": [
     "dist",
@@ -24,6 +24,7 @@
   "scripts": {
     "build-declarations": "tsc -d && node scripts/move-type-declarations.js",
     "build": "npm run build-declarations && rollup -c",
+    "dev": "rollup -cw",
     "test": "mocha --opts mocha.opts",
     "pretest": "npm run build"
   },
