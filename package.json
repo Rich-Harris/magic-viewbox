@@ -1,7 +1,7 @@
 {
   "name": "magic-viewbox",
   "description": "Library for making draggable, zoomable, interactive SVG viewboxes",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "dist/magic-viewbox.umd.js",
   "module": "dist/magic-viewbox.esm.js",
   "types": "types/index.d.ts",
